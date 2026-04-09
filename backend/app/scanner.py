@@ -53,6 +53,22 @@ def compute_bollinger(series: pd.Series, period: int = 20) -> tuple[pd.Series, p
     return upper, sma, lower
 
 
+def _get_quick_price(ticker: str) -> Optional[dict]:
+    """Fetch only current price and change_pct for a ticker (no full analysis)."""
+    try:
+        t = yf.Ticker(ticker)
+        df = t.history(period="2d", interval="1d")
+        if df is None or len(df) < 2:
+            return None
+        close = df["Close"]
+        price = float(close.iloc[-1])
+        prev = float(close.iloc[-2])
+        change_pct = (price - prev) / prev * 100
+        return {"price": round(price, 4), "change_pct": round(change_pct, 2)}
+    except Exception:
+        return None
+
+
 def analyze_ticker(ticker: str, interval: str = "1d", period: str = "3mo") -> Optional[dict]:
     """Analyze a ticker for swing trade setups. Returns a signal dict or None."""
     try:
@@ -67,6 +83,8 @@ def analyze_ticker(ticker: str, interval: str = "1d", period: str = "3mo") -> Op
         low = df["Low"]
 
         current_price = close.iloc[-1]
+        prev_price = close.iloc[-2]
+        change_pct = round(float((current_price - prev_price) / prev_price * 100), 2)
 
         rsi = compute_rsi(close)
         rsi_now = rsi.iloc[-1]
@@ -194,6 +212,7 @@ def analyze_ticker(ticker: str, interval: str = "1d", period: str = "3mo") -> Op
             "atr_pct": round(float(atr_pct), 2),
             "vol_ratio": round(float(vol_ratio), 1),
             "current_price": round(float(current_price), 4),
+            "change_pct": change_pct,
         }
 
     except Exception as e:
@@ -256,15 +275,23 @@ class BaseScanner:
         if len(self.history) > self._max_history:
             self.history = self.history[-self._max_history:]
 
-    def _do_scan(self, watchlist: list[str], interval: str, period: str) -> list[dict]:
+    def _do_scan(
+        self, watchlist: list[str], interval: str, period: str
+    ) -> tuple[list[dict], dict[str, dict]]:
+        """Run analysis on all tickers. Returns (signals, prices_by_ticker)."""
         results = []
+        prices: dict[str, dict] = {}
         for ticker in watchlist:
             signal = analyze_ticker(ticker, interval, period)
             if signal:
+                prices[ticker] = {
+                    "price": signal["current_price"],
+                    "change_pct": signal.get("change_pct", 0.0),
+                }
                 results.append(signal)
             time.sleep(0.2)
         results.sort(key=lambda x: x["strength"], reverse=True)
-        return results
+        return results, prices
 
     async def _process_results(self, results: list[dict], asset_type: str):
         self._expire_old_signals()
@@ -282,6 +309,63 @@ class BaseScanner:
                     "asset_type": asset_type,
                     "data": {**signal, "timestamp": now.isoformat()},
                 })
+
+    async def _post_scan_updates(self, scanned_prices: dict[str, dict]):
+        """After each scan: broadcast live prices and check target/stop hits."""
+        to_remove: list[str] = []
+
+        for ticker, signal in list(self.active_signals.items()):
+            # Use price from current scan if available; otherwise fetch fresh
+            if ticker in scanned_prices:
+                price_data = scanned_prices[ticker]
+            else:
+                price_data = await asyncio.to_thread(_get_quick_price, ticker)
+
+            if not price_data:
+                continue
+
+            current_price = price_data["price"]
+            change_pct = price_data.get("change_pct", 0.0)
+
+            # Broadcast price update
+            await self.manager.broadcast({
+                "type": "price",
+                "ticker": ticker,
+                "price": current_price,
+                "change_pct": change_pct,
+            })
+
+            # Check if target_1 or stop_loss has been hit
+            direction = signal["direction"]
+            hit_status: Optional[str] = None
+
+            if direction == "LONG":
+                if current_price >= signal["target_1"]:
+                    hit_status = "won"
+                elif current_price <= signal["stop_loss"]:
+                    hit_status = "lost"
+            else:  # SHORT
+                if current_price <= signal["target_1"]:
+                    hit_status = "won"
+                elif current_price >= signal["stop_loss"]:
+                    hit_status = "lost"
+
+            if hit_status:
+                signal["status"] = hit_status
+                self.history.append({**signal, "timestamp": signal["timestamp"].isoformat()})
+                to_remove.append(ticker)
+                await self.manager.broadcast({
+                    "type": "signal_update",
+                    "ticker": ticker,
+                    "status": hit_status,
+                })
+                logger.info("Signal %s closed: %s", ticker, hit_status)
+
+        for t in to_remove:
+            del self.active_signals[t]
+
+        if len(self.history) > self._max_history:
+            self.history = self.history[-self._max_history:]
 
 
 # ---------------------------------------------------------------------------
@@ -302,8 +386,9 @@ class StockScanner(BaseScanner):
         if not self.is_market_open():
             return
         logger.info("StockScanner: scanning %d stocks", len(STOCK_WATCHLIST))
-        results = await asyncio.to_thread(self._do_scan, STOCK_WATCHLIST, "1d", "3mo")
+        results, prices = await asyncio.to_thread(self._do_scan, STOCK_WATCHLIST, "1d", "3mo")
         await self._process_results(results, "stock")
+        await self._post_scan_updates(prices)
         logger.info("StockScanner: found %d signals", len(results))
 
 
@@ -316,6 +401,7 @@ class CryptoScanner(BaseScanner):
 
     async def scan(self):
         logger.info("CryptoScanner: scanning %d cryptos", len(CRYPTO_WATCHLIST))
-        results = await asyncio.to_thread(self._do_scan, CRYPTO_WATCHLIST, "1h", "7d")
+        results, prices = await asyncio.to_thread(self._do_scan, CRYPTO_WATCHLIST, "1h", "7d")
         await self._process_results(results, "crypto")
+        await self._post_scan_updates(prices)
         logger.info("CryptoScanner: found %d signals", len(results))
