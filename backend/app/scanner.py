@@ -194,6 +194,8 @@ def analyze_ticker(ticker: str, interval: str = "1d", period: str = "3mo") -> Op
             "atr_pct": round(float(atr_pct), 2),
             "vol_ratio": round(float(vol_ratio), 1),
             "current_price": round(float(current_price), 4),
+            "day_high": round(float(high.iloc[-1]), 4),
+            "day_low": round(float(low.iloc[-1]), 4),
         }
 
     except Exception as e:
@@ -266,9 +268,52 @@ class BaseScanner:
         results.sort(key=lambda x: x["strength"], reverse=True)
         return results
 
+    @staticmethod
+    def _check_outcome(sig: dict, day_high: float, day_low: float) -> str | None:
+        """Return 'won', 'lost', or None based on whether stop/target was hit."""
+        if sig["direction"] == "LONG":
+            if day_high >= sig["target_1"]:
+                return "won"
+            if day_low <= sig["stop_loss"]:
+                return "lost"
+        else:  # SHORT
+            if day_low <= sig["target_1"]:
+                return "won"
+            if day_high >= sig["stop_loss"]:
+                return "lost"
+        return None
+
     async def _process_results(self, results: list[dict], asset_type: str):
         self._expire_old_signals()
         now = datetime.now(timezone.utc)
+
+        # Build a price map from the freshly-scanned data for resolution checks.
+        price_map: dict[str, dict] = {r["ticker"]: r for r in results}
+
+        # Resolve any active signals whose stop or target was hit this scan cycle.
+        resolved: list[str] = []
+        for ticker, sig in list(self.active_signals.items()):
+            data = price_map.get(ticker)
+            if data is None:
+                continue
+            outcome = self._check_outcome(
+                sig,
+                data.get("day_high", data["current_price"]),
+                data.get("day_low", data["current_price"]),
+            )
+            if outcome:
+                sig["status"] = outcome
+                ts = sig.get("timestamp")
+                self.history.append({
+                    **sig,
+                    "timestamp": ts.isoformat() if not isinstance(ts, str) else ts,
+                })
+                resolved.append(ticker)
+        for ticker in resolved:
+            del self.active_signals[ticker]
+        if len(self.history) > self._max_history:
+            self.history = self.history[-self._max_history:]
+
         for signal in results:
             ticker = signal["ticker"]
             signal["timestamp"] = now
