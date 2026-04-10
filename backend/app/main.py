@@ -8,6 +8,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .chart_data import router as chart_router
+from .db import init_db
 from .scanner import ConnectionManager, CryptoScanner, StockScanner
 from .signals import router as signals_router
 
@@ -17,6 +18,7 @@ logger = logging.getLogger("elephant.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    init_db()
     manager = ConnectionManager()
     stock_scanner = StockScanner(manager)
     crypto_scanner = CryptoScanner(manager)

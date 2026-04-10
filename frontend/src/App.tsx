@@ -6,6 +6,7 @@ import TopBar from './components/TopBar'
 import StocksPage from './pages/StocksPage'
 import CryptoPage from './pages/CryptoPage'
 import KalshiPage from './pages/KalshiPage'
+import PerformancePage from './pages/PerformancePage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -17,7 +18,7 @@ const queryClient = new QueryClient({
   },
 })
 
-type Tab = 'Stocks' | 'Crypto' | 'Kalshi'
+type Tab = 'Stocks' | 'Crypto' | 'Kalshi' | 'Performance'
 
 function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('Stocks')
@@ -30,7 +31,7 @@ function Dashboard() {
       {/* Tab navigation */}
       <nav className="border-b border-border sticky top-[56px] z-30 bg-gray-950">
         <div className="max-w-7xl mx-auto px-4 flex">
-          {(['Stocks', 'Crypto', 'Kalshi'] as Tab[]).map((tab) => (
+          {(['Stocks', 'Crypto', 'Kalshi', 'Performance'] as Tab[]).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -50,6 +51,7 @@ function Dashboard() {
         {activeTab === 'Stocks' && <StocksPage />}
         {activeTab === 'Crypto' && <CryptoPage />}
         {activeTab === 'Kalshi' && <KalshiPage />}
+        {activeTab === 'Performance' && <PerformancePage />}
       </main>
     </div>
   )

@@ -13,6 +13,7 @@ import pandas as pd
 import yfinance as yf
 from fastapi import WebSocket
 
+from . import db as _db
 from .watchlists import CRYPTO_WATCHLIST, STOCK_WATCHLIST
 
 logger = logging.getLogger("elephant.scanner")
@@ -270,6 +271,11 @@ class BaseScanner:
                 sig["status"] = "expired"
                 self.history.append({**sig, "timestamp": sig["timestamp"].isoformat()})
                 expired.append(ticker)
+                if sig.get("signal_id"):
+                    try:
+                        _db.update_signal(sig["signal_id"], "expired")
+                    except Exception as exc:
+                        logger.warning("DB update_signal (expired) failed: %s", exc)
         for t in expired:
             del self.active_signals[t]
         if len(self.history) > self._max_history:
@@ -304,6 +310,12 @@ class BaseScanner:
             is_new = ticker not in self.active_signals
             self.active_signals[ticker] = signal
             if is_new:
+                try:
+                    signal_id = _db.save_signal(signal)
+                    signal["signal_id"] = signal_id
+                    self.active_signals[ticker]["signal_id"] = signal_id
+                except Exception as exc:
+                    logger.warning("DB save_signal failed: %s", exc)
                 await self.manager.broadcast({
                     "type": "signal",
                     "asset_type": asset_type,
@@ -354,6 +366,11 @@ class BaseScanner:
                 signal["status"] = hit_status
                 self.history.append({**signal, "timestamp": signal["timestamp"].isoformat()})
                 to_remove.append(ticker)
+                if signal.get("signal_id"):
+                    try:
+                        _db.update_signal(signal["signal_id"], hit_status, current_price)
+                    except Exception as exc:
+                        logger.warning("DB update_signal (%s) failed: %s", hit_status, exc)
                 await self.manager.broadcast({
                     "type": "signal_update",
                     "ticker": ticker,
