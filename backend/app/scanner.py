@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 from fastapi import WebSocket
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from . import db as _db
 from .settings import get_settings, post_signal_to_discord
@@ -22,6 +23,20 @@ logger = logging.getLogger("elephant.scanner")
 ET = ZoneInfo("America/New_York")
 MARKET_OPEN_MINUTES = 9 * 60 + 30   # 9:30 AM ET
 MARKET_CLOSE_MINUTES = 16 * 60      # 4:00 PM ET
+
+
+# ---------------------------------------------------------------------------
+# yfinance fetch helper — retries up to 3 times with 1s / 2s / 4s backoff
+# ---------------------------------------------------------------------------
+
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=1, min=1, max=4),
+)
+def _fetch_history(ticker: str, period: str, interval: str) -> pd.DataFrame:
+    """Download yfinance price history with automatic retry on transient failures."""
+    return yf.Ticker(ticker).history(period=period, interval=interval, timeout=10)
 
 
 # ---------------------------------------------------------------------------
@@ -58,8 +73,7 @@ def compute_bollinger(series: pd.Series, period: int = 20) -> tuple[pd.Series, p
 def _get_quick_price(ticker: str) -> Optional[dict]:
     """Fetch only current price and change_pct for a ticker (no full analysis)."""
     try:
-        t = yf.Ticker(ticker)
-        df = t.history(period="2d", interval="1d")
+        df = _fetch_history(ticker, "2d", "1d")
         if df is None or len(df) < 2:
             return None
         close = df["Close"]
@@ -74,8 +88,7 @@ def _get_quick_price(ticker: str) -> Optional[dict]:
 def analyze_ticker(ticker: str, interval: str = "1d", period: str = "3mo") -> Optional[dict]:
     """Analyze a ticker for swing trade setups. Returns a signal dict or None."""
     try:
-        t = yf.Ticker(ticker)
-        df = t.history(period=period, interval=interval)
+        df = _fetch_history(ticker, period, interval)
         if df is None or len(df) < 30:
             return None
 
