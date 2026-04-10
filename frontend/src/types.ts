@@ -108,6 +108,17 @@ export interface CategoryStats {
   losses: number
 }
 
+export interface Settings {
+  stock_scan_interval: '5m' | '15m' | '30m'
+  crypto_scan_interval: '1m' | '5m' | '15m'
+  min_signal_strength: number
+  sound_alerts_enabled: boolean
+  discord_webhook_enabled: boolean
+  discord_webhook_url: string
+  stock_watchlist: string[]
+  crypto_watchlist: string[]
+}
+
 export interface PerformanceStats {
   total: number
   wins: number

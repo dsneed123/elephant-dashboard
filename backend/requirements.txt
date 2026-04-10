@@ -5,3 +5,4 @@ yfinance
 numpy
 pandas
 apscheduler
+httpx
