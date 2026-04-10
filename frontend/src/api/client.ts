@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { Candle, Signal } from '../types'
+import { Candle, KalshiSignal, KalshiWhale, PerformanceStats, Signal, SignalHistory } from '../types'
 
 const api = axios.create({ baseURL: '/api' })
 
@@ -13,8 +13,13 @@ export async function fetchCryptoSignals(): Promise<Signal[]> {
   return data
 }
 
-export async function fetchKalshiSignals(): Promise<Signal[]> {
-  const { data } = await api.get<Signal[]>('/signals/kalshi')
+export async function fetchKalshiSignals(): Promise<KalshiSignal[]> {
+  const { data } = await api.get<KalshiSignal[]>('/signals/kalshi')
+  return data
+}
+
+export async function fetchKalshiWhales(): Promise<KalshiWhale[]> {
+  const { data } = await api.get<KalshiWhale[]>('/signals/kalshi/whales')
   return data
 }
 
@@ -26,6 +31,18 @@ export async function fetchChartData(
   const { data } = await api.get<Candle[]>(`/chart/${encodeURIComponent(ticker)}`, {
     params: { interval, period },
   })
+  return data
+}
+
+export async function fetchSignalHistory(limit = 200, offset = 0): Promise<SignalHistory[]> {
+  const { data } = await api.get<SignalHistory[]>('/signals/history', {
+    params: { limit, offset },
+  })
+  return data
+}
+
+export async function fetchPerformanceStats(): Promise<PerformanceStats> {
+  const { data } = await api.get<PerformanceStats>('/signals/performance')
   return data
 }
 
