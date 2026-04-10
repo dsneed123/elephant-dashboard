@@ -14,6 +14,7 @@ import yfinance as yf
 from fastapi import WebSocket
 
 from . import db as _db
+from .settings import get_settings, post_signal_to_discord
 from .watchlists import CRYPTO_WATCHLIST, STOCK_WATCHLIST
 
 logger = logging.getLogger("elephant.scanner")
@@ -302,7 +303,15 @@ class BaseScanner:
     async def _process_results(self, results: list[dict], asset_type: str):
         self._expire_old_signals()
         now = datetime.now(timezone.utc)
+        settings = get_settings()
+        min_strength = settings.get("min_signal_strength", 25)
+        discord_enabled = settings.get("discord_webhook_enabled", False)
+        discord_url = settings.get("discord_webhook_url", "")
+
         for signal in results:
+            # Apply user-configured minimum strength filter
+            if signal.get("strength", 0) < min_strength:
+                continue
             ticker = signal["ticker"]
             signal["timestamp"] = now
             signal["status"] = "active"
@@ -321,6 +330,8 @@ class BaseScanner:
                     "asset_type": asset_type,
                     "data": {**signal, "timestamp": now.isoformat()},
                 })
+                if discord_enabled and discord_url:
+                    await post_signal_to_discord(signal, discord_url)
 
     async def _post_scan_updates(self, scanned_prices: dict[str, dict]):
         """After each scan: broadcast live prices and check target/stop hits."""
@@ -402,8 +413,9 @@ class StockScanner(BaseScanner):
     async def scan(self):
         if not self.is_market_open():
             return
-        logger.info("StockScanner: scanning %d stocks", len(STOCK_WATCHLIST))
-        results, prices = await asyncio.to_thread(self._do_scan, STOCK_WATCHLIST, "1d", "3mo")
+        watchlist = get_settings().get("stock_watchlist") or STOCK_WATCHLIST
+        logger.info("StockScanner: scanning %d stocks", len(watchlist))
+        results, prices = await asyncio.to_thread(self._do_scan, watchlist, "1d", "3mo")
         await self._process_results(results, "stock")
         await self._post_scan_updates(prices)
         logger.info("StockScanner: found %d signals", len(results))
@@ -417,8 +429,9 @@ class CryptoScanner(BaseScanner):
     SIGNAL_EXPIRY_HOURS = 24
 
     async def scan(self):
-        logger.info("CryptoScanner: scanning %d cryptos", len(CRYPTO_WATCHLIST))
-        results, prices = await asyncio.to_thread(self._do_scan, CRYPTO_WATCHLIST, "1h", "7d")
+        watchlist = get_settings().get("crypto_watchlist") or CRYPTO_WATCHLIST
+        logger.info("CryptoScanner: scanning %d cryptos", len(watchlist))
+        results, prices = await asyncio.to_thread(self._do_scan, watchlist, "1h", "7d")
         await self._process_results(results, "crypto")
         await self._post_scan_updates(prices)
         logger.info("CryptoScanner: found %d signals", len(results))

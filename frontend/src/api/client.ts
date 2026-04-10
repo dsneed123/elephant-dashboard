@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { Candle, KalshiSignal, KalshiWhale, PerformanceStats, Signal, SignalHistory } from '../types'
+import { Candle, KalshiSignal, KalshiWhale, PerformanceStats, Settings, Signal, SignalHistory } from '../types'
 
 const api = axios.create({ baseURL: '/api' })
 
@@ -48,5 +48,15 @@ export async function fetchPerformanceStats(): Promise<PerformanceStats> {
 
 export async function fetchHealth(): Promise<{ status: string }> {
   const { data } = await api.get('/health')
+  return data
+}
+
+export async function fetchSettings(): Promise<Settings> {
+  const { data } = await api.get<Settings>('/settings')
+  return data
+}
+
+export async function updateSettings(settings: Settings): Promise<Settings> {
+  const { data } = await api.put<Settings>('/settings', settings)
   return data
 }

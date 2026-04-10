@@ -7,11 +7,10 @@ import {
   EquityPoint,
   HeatmapDay,
   PerformanceStats,
-  Signal,
   SignalHistory,
 } from '../types'
 import Modal from '../components/Modal'
-import ChartView from '../components/ChartView'
+import HistoryChartView from '../components/HistoryChartView'
 
 export default function PerformancePage() {
   const [selectedHistory, setSelectedHistory] = useState<SignalHistory | null>(null)
@@ -27,38 +26,6 @@ export default function PerformancePage() {
     queryFn: () => fetchSignalHistory(200),
     staleTime: 60_000,
   })
-
-  const adaptToSignal = (h: SignalHistory): Signal => {
-    const risk =
-      h.direction === 'LONG'
-        ? h.entry_price - h.stop_loss
-        : h.stop_loss - h.entry_price
-    const reward =
-      h.direction === 'LONG'
-        ? h.target_1 - h.entry_price
-        : h.entry_price - h.target_1
-    const rr_ratio = risk > 0 ? Math.abs(reward / risk) : 0
-
-    return {
-      ticker: h.ticker,
-      direction: h.direction,
-      strength: h.strength,
-      signals: h.signals,
-      entry: h.entry_price,
-      stop_loss: h.stop_loss,
-      target_1: h.target_1,
-      target_2: h.target_2,
-      rr_ratio: Math.round(rr_ratio * 100) / 100,
-      hold_duration: '',
-      rsi: 0,
-      atr_pct: 0,
-      vol_ratio: 0,
-      current_price: h.exit_price ?? h.entry_price,
-      timestamp: h.created_at,
-      status: h.status,
-      asset_type: h.asset_type,
-    }
-  }
 
   return (
     <div className="space-y-6">
@@ -109,7 +76,7 @@ export default function PerformancePage() {
           onClose={() => setSelectedHistory(null)}
           title={`${selectedHistory.ticker} · ${selectedHistory.direction} · ${selectedHistory.status.toUpperCase()}`}
         >
-          <ChartView signal={adaptToSignal(selectedHistory)} />
+          <HistoryChartView signal={selectedHistory} />
         </Modal>
       )}
     </div>
